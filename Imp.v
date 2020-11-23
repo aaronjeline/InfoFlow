@@ -854,3 +854,70 @@ Proof.
       * exfalso. assumption.
       * subst. reflexivity.
 Qed.
+
+Ltac secret_merge :=
+  symmetry; apply secret_doms; simpl; auto.
+
+Theorem com_EENI :
+  forall (c1 c2 : com)
+    (ctxt1 ctxt2 ctxt1' ctxt2' : sec_context),
+    c1 == c2 ->
+    ctxt1 == ctxt2 ->
+    ctxt1 =[ c1 ]=> ctxt1' ->
+    ctxt2 =[ c2 ]=> ctxt2' ->
+    ctxt1' == ctxt2'.
+Proof.
+  intros c1.
+  induction c1; intros.
+  - inversion H1. subst. unfold "==" in H. simpl in H.
+    destruct c2 eqn:Hc2;
+      try (exfalso; assumption).
+    + subst. inversion H2. subst. assumption.
+  - unfold "==" in H. simpl in H.
+    destruct c2 eqn:Hc2;
+      try (destruct l; exfalso; assumption).
+    + subst.
+      destruct l; destruct l0;
+        try (exfalso; assumption).
+      * inversion H1. subst. inversion H2. subst.
+        replace (merge_list [l__v; Secret; l]) with Secret in *;
+          try secret_merge.
+        replace (merge_list [l__v0; Secret; l0]) with Secret in *;
+          try secret_merge.
+        -- inversion H0. subst.
+           unfold "==". simpl. split.
+           ++ reflexivity.
+           ++ apply add_indist. assumption.
+              apply secret_indist.
+      * destruct H. subst. inversion H1. inversion H2. subst.
+        inversion H0. subst.
+        assert (l__v0 = l__v).
+        {
+          assert ((n, l__v) == (n0, l__v0)).
+          apply aexp_EENI with
+              (st1 := st)
+              (st2 := st0)
+              (a := a0); assumption.
+          unfold "==" in H. simpl in H.
+          destruct l__v; destruct l__v0; auto; exfalso; assumption.
+        }
+        subst.
+        destruct l eqn:Hl.
+        -- split. reflexivity.
+           apply add_indist.
+           assumption.
+           destruct l__v; simpl; tauto.
+        -- destruct l__v.
+           ++ unfold "==". simpl. split. auto.
+              apply add_indist. assumption.
+              simpl. tauto.
+           ++ unfold "==". simpl. split. auto.
+              apply add_indist. assumption.
+              simpl. assert ((n, Public) == (n0, Public)).
+              apply aexp_EENI with
+                  (st1 := st)
+                  (st2 := st0)
+                  (a := a0); assumption.
+              unfold "==" in H. simpl in H. subst.
+              auto.
+    Admitted.
