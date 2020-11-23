@@ -858,6 +858,9 @@ Qed.
 Ltac secret_merge :=
   symmetry; apply secret_doms; simpl; auto.
 
+Ltac open_indist H :=
+  unfold "==" in H; simpl in H.
+
 Theorem com_EENI :
   forall (c1 c2 : com)
     (ctxt1 ctxt2 ctxt1' ctxt2' : sec_context),
@@ -920,4 +923,20 @@ Proof.
                   (a := a0); assumption.
               unfold "==" in H. simpl in H. subst.
               auto.
-    Admitted.
+  - open_indist H. destruct c2;
+                     try (exfalso; assumption).
+    + inversion H1. inversion H2. subst.
+      assert (ctxt' == ctxt'0) as Hindist1.
+      {
+        apply IHc1_1 with
+            (c2 := c2_1)
+            (ctxt1 := ctxt1)
+            (ctxt2 := ctxt2); try assumption.
+        inversion H. unfold "==". simpl. assumption.
+      }
+      apply IHc1_2 with
+          (c2 := c2_2)
+          (ctxt1 := ctxt')
+          (ctxt2 := ctxt'0); try assumption.
+      inversion H. unfold "==". simpl. assumption.
+  Abort.
