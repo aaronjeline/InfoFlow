@@ -159,7 +159,6 @@ Definition state := M.t nat_value.
 Close Scope string_scope.
 
 
-Check P.for_all.
 Instance state_indist : Distinguishable state :=
   {
   indist s1 s2 := forall (x1 : string) (v1: nat_value),
@@ -168,6 +167,31 @@ Instance state_indist : Distinguishable state :=
        MapsTo x1 v2 s2 /\ v1 == v2)
   }.
 
+Theorem indist_trans : forall (st1 st2 st3 : state),
+    st1 == st2 ->
+    st2 == st3 ->
+    st1 == st3.
+Proof.
+  intros.
+  unfold "==".
+  simpl. intros.
+  unfold "==" in H. simpl in H.
+  specialize (H x1 v1).
+  destruct H as [v2]. assumption.
+  destruct H.
+  unfold "==" in H0. simpl in H0.
+  specialize (H0 x1 v2). destruct H0 as [v3].
+  assumption.
+  destruct H0. exists v3. split.
+  - assumption.
+  - destruct v1. destruct v3. destruct l; destruct l0.
+    + tauto.
+    + destruct v2. destruct l; assumption.
+    + destruct v2. destruct l; assumption.
+    + destruct v2. destruct l.
+      * exfalso. assumption.
+      * subst. reflexivity.
+Qed.
 
 Inductive aexp : Type :=
   | ANum (n : nat)
@@ -423,7 +447,7 @@ Inductive ceval : com -> sec_context -> sec_context -> Prop :=
   | E_Ass  : forall (st : M.t nat_value) a n x l l__v l__s,
       aevalR st a (n, l__v) ->
       In x st ->
-      writing_valid x st l__v ->
+      writing_valid x st (merge l__v l) ->
       (st,l) =[ x := a , l__s ]=>
       (add x (n, merge_list [l__v;l__s; l]) st, l)
   | E_Seq : forall c1 c2 ctxt ctxt' ctxt'',
@@ -829,37 +853,136 @@ Proof.
 Qed.
 
 
-Theorem indist_trans : forall (st1 st2 st3 : state),
-    st1 == st2 ->
-    st2 == st3 ->
-    st1 == st3.
-Proof.
-  intros.
-  unfold "==".
-  simpl. intros.
-  unfold "==" in H. simpl in H.
-  specialize (H x1 v1).
-  destruct H as [v2]. assumption.
-  destruct H.
-  unfold "==" in H0. simpl in H0.
-  specialize (H0 x1 v2). destruct H0 as [v3].
-  assumption.
-  destruct H0. exists v3. split.
-  - assumption.
-  - destruct v1. destruct v3. destruct l; destruct l0.
-    + tauto.
-    + destruct v2. destruct l; assumption.
-    + destruct v2. destruct l; assumption.
-    + destruct v2. destruct l.
-      * exfalso. assumption.
-      * subst. reflexivity.
-Qed.
 
 Ltac secret_merge :=
   symmetry; apply secret_doms; simpl; auto.
 
 Ltac open_indist H :=
   unfold "==" in H; simpl in H.
+
+Lemma indist_f : forall (c1 c2 : com),
+    com_indist_f c1 c2 ->
+    c1 == c2.
+Proof.
+  intros. unfold "==". simpl. assumption.
+Qed.
+
+Theorem com_indist_refl : forall (c : com),
+    c == c.
+Proof.
+  intros. induction c;
+            unfold "=="; simpl; try tauto.
+  - destruct l; auto.
+Qed.
+
+Theorem state_indist_refl : forall (st : state),
+    st == st.
+Proof.
+  intros. unfold "==". simpl.
+  intros. exists v1.
+  split.
+  - assumption.
+  - destruct v1. destruct l; auto.
+Qed.
+
+Lemma ctxt_split : forall (st1 st2 : state) (l1 l2 : label),
+    (st1, l1) == (st2, l2) ->
+    st1 == st2 /\ l1 = l2.
+Proof.
+  intros.
+  unfold "==" in *. simpl in *.
+  destruct H. subst. split; auto.
+Qed.
+
+Theorem ctxt_indist_refl : forall (ctxt : sec_context),
+    ctxt == ctxt.
+Proof.
+  intros. unfold "==". simpl.
+  destruct ctxt. split.
+  - reflexivity.
+  - apply state_indist_refl.
+Qed.
+
+Lemma indist_neq_secret : forall {X} (x1 x2 : X) (l1 l2 : label),
+    x1 <> x2 ->
+    (x1, l1) == (x2, l2) ->
+    l1 = l2 /\ l1 = Secret.
+Proof.
+  intros. unfold "==" in *. simpl in *.
+  destruct l1; destruct l2;
+    auto; exfalso; auto.
+Qed.
+
+Lemma indist_samelabel : forall {X} (x1 x2 : X) (l1 l2 : label),
+    (x1, l1) == (x2, l2) ->
+    l1 = l2.
+Proof.
+  intros.
+  unfold "==" in H. simpl in H.
+  destruct l1; destruct l2; subst;
+    auto; exfalso; auto.
+Qed.
+
+Ltac simpl_indist :=
+  unfold "=="; simpl; split; auto.
+
+
+
+Theorem label_const : forall c (st st' : state) (l l' : label),
+    (st, l) =[ c ]=> (st', l') ->
+    l = l'.
+Proof.
+  intros c.
+  induction c; intros.
+  - inversion H. auto.
+  - inversion H. subst. auto.
+  - inversion H. subst.
+    rename l' into l''.
+    rename st' into st''.
+    destruct ctxt' as [ st' l' ].
+    assert (l = l').
+    {
+      apply IHc1 with (st := st) (st' := st').
+      assumption.
+    }
+    subst.
+    apply IHc2 with (st := st') (st' := st'').
+    assumption.
+  - inversion H; subst; auto.
+Qed.
+
+
+Theorem secret_step : forall (c : com) (st st': state),
+    (st, Secret) =[ c ]=> (st', Secret) ->
+    st == st'.
+Proof.
+  intros c.
+  induction c; intros.
+  - inversion H. subst. apply state_indist_refl.
+  - inversion H. subst.
+    replace (merge_list [l__v; l; Secret]) with Secret in *.
+    + apply add_secret.
+      replace (merge l__v Secret) with Secret in *.
+      assumption.
+      destruct l__v; auto.
+    + symmetry. apply secret_doms. simpl. auto.
+  - rename st' into st''.
+    inversion H. subst.
+    destruct ctxt' as [ st' l ].
+    destruct l.
+    + apply indist_trans with (st2 := st').
+      * apply IHc1. assumption.
+      * apply IHc2. assumption.
+    + assert (Secret = Public).
+      {
+        apply (label_const c1 st st'). assumption.
+      }
+      congruence.
+  - inversion H; subst;
+      replace (merge Secret l__guard) with Secret in *;
+      auto.
+Qed.
+
 
 Theorem com_EENI :
   forall (c1 c2 : com)
@@ -939,4 +1062,71 @@ Proof.
           (ctxt1 := ctxt')
           (ctxt2 := ctxt'0); try assumption.
       inversion H. unfold "==". simpl. assumption.
-  Abort.
+  - (* Conditionals *)
+    destruct c2; try inversion H.
+    inversion H. subst.
+    clear H5 H6. destruct H4.
+    apply indist_f in H3.
+    apply indist_f in H4.
+    destruct ctxt1 as [ st1 l1 ].
+    destruct ctxt2 as [ st2 l2 ].
+    destruct ctxt1' as [ st1' l1' ].
+    destruct ctxt2' as [ st2' l2' ].
+    apply ctxt_split in H0. destruct H0. subst.
+    inversion H1; inversion H2;
+      destruct l2'; subst.
+    + (* both eval to true *)
+      replace l__guard0 with l__guard in *.
+      * replace (merge Secret l__guard) with Secret in *.
+        -- apply IHc1_1 with
+               (c2 := c2_1)
+               (ctxt1 := (st1, Secret))
+               (ctxt2 := (st2, Secret));
+             try assumption. simpl_indist.
+        -- auto.
+      * apply indist_samelabel with
+            (x1 := true) (x2 := true).
+        apply bexp_EENI with (st1 := st1) (st2 := st2)
+                             (b := b0);
+          assumption.
+    + (* both eval to true, public *)
+      replace l__guard0 with l__guard in *.
+      * destruct l__guard.
+        -- replace (merge Public Secret) with Secret in *.
+           ++ apply IHc1_1 with
+                  (c2 := c2_1)
+                  (ctxt1 := (st1, Secret))
+                  (ctxt2 := (st2, Secret)); try assumption.
+              simpl_indist.
+           ++ auto.
+        -- replace (merge Public Public) with Public in *.
+           ++ apply IHc1_1 with
+                  (c2 := c2_1)
+                  (ctxt1 := (st1, Public))
+                  (ctxt2 := (st2, Public)); try assumption.
+              simpl_indist.
+           ++ auto.
+      * apply indist_samelabel with
+            (x1 := true) (x2 := true).
+        apply bexp_EENI with
+            (st1 := st1) (st2 := st2) (b := b0);
+          assumption.
+    + replace l__guard0 with l__guard in *.
+      * replace l__guard with Secret in *.
+        -- replace (merge Secret Secret) with Secret in *.
+           ++ assert (st1 == st1').
+              {
+                apply secret_step with (c := c1_1).
+                assumption.
+              }
+              assert (st2 == st2').
+              {
+                apply secret_step with (c := c2_2).
+                assumption.
+              }
+              assert (st1 == st2').
+              {
+                apply indist_trans with (st2 := st2);
+                  assumption.
+              }
+Abort.
