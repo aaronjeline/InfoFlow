@@ -77,6 +77,28 @@ Inductive label : Type :=
   | Secret
   | Public.
 
+Definition label_eqb l1 l2 :=
+  match l1, l2 with
+| Secret, Secret => true
+| Public, Public => true
+| _, _ => false
+  end.
+
+Definition label_eqb_eq : forall l1 l2,
+    label_eqb l1 l2 = true -> l1 = l2.
+Proof.
+  intros.
+  destruct l1; destruct l2; auto; inversion H.
+Qed.
+
+Definition label_eqb_neq : forall l1 l2,
+    label_eqb l1 l2 = false -> l1 <> l2.
+Proof.
+  intros.
+  destruct l1; destruct l2; auto; congruence.
+Qed.
+   
+
 
 Definition merge (l1 l2 : label) : label :=
   match l1, l2 with
@@ -1087,6 +1109,97 @@ Proof.
       auto.
 Qed.
 
+Theorem leak_step : forall (c : com) (st st' : state),
+    (st, Secret) =[ c ]=> (st', Public) -> False.
+Proof.
+  intros.
+  generalize dependent st.
+  generalize dependent st'.
+  induction c; intros; inversion H.
+  - inversion H. subst. destruct ctxt'.
+    destruct l.
+    + eapply IHc2. eauto.
+    + eapply IHc1. eauto.
+Qed.
+
+
+Lemma indist_diff_label : forall (st1 st2 : state) (n1 n2 : nat)
+                            (l1 l2 : label) (x : string),
+    st1 == st2 ->
+    l1 <> l2 ->
+    MapsTo x (n1, l1) st1 ->
+    MapsTo x (n2, l2) st2 ->
+    False.
+Proof.
+  intros.
+  simpl "==" in H.
+  specialize (H x (n1, l1) (n2, l2)). destruct H.
+  destruct H as [v2']. assumption.
+  destruct H.
+  replace v2' with (n2, l2) in *.
+  - destruct l1; destruct l2;
+      try tauto;
+      try (exfalso; assumption).
+  - apply MapsTo_eq with (st := st2) (x := x); assumption.
+Qed.
+
+
+
+
+Theorem aeval_diverges : forall (a : aexp) (st1 st2 : state)
+                           (l1 l2 : label) (n1 n2 : nat),
+    st1 == st2 ->
+    n1 <> n2 ->
+    aevalR st1 a (n1, l1) ->
+    aevalR st2 a (n2, l2) ->
+    l1 = Secret /\ l2 = Secret.
+Proof.
+  intros.
+  destruct (label_eqb l1 l2) eqn:Heq.
+  - apply label_eqb_eq in Heq.
+    subst.
+    assert ((n1, l2) == (n2, l2)).
+    eapply aexp_EENI; eauto.
+    simpl "==" in H3. destruct l2.
+    + auto.
+    + congruence.
+  - apply label_eqb_neq in Heq.
+    assert ((n1, l1) == (n2, l2)).
+    eapply aexp_EENI; eauto.
+    simpl "==" in H3.
+    destruct l1; destruct l2;
+      auto; exfalso; auto.
+Qed.
+
+Theorem beval_diverges : forall (b : bexp) (st1 st2 : state)
+                           (l1 l2 : label) (b1 b2 : bool),
+    st1 == st2 ->
+    bevalR st1 b (b1, l1) ->
+    bevalR st2 b (b2, l2) ->
+    b1 <> b2 ->
+    l1 = Secret /\ l2 = Secret.
+Proof.
+  intros.
+  destruct (label_eqb l1 l2) eqn:Heq.
+  - apply label_eqb_eq in Heq.
+    subst.
+    assert ((b1, l2) == (b2, l2)).
+    eapply bexp_EENI; eauto.
+    simpl "==" in H3. destruct l2.
+    + auto.
+    + congruence.
+  - apply label_eqb_neq in Heq.
+    assert ((b1, l1) == (b2, l2)).
+    eapply bexp_EENI; eauto.
+    simpl "==" in H3.
+    destruct l2; destruct l1; auto; exfalso; auto.
+Qed.
+
+Ltac brute l1 l2 :=
+  destruct l1; destruct l2;
+  auto; exfalso; auto.
+
+
 
 Theorem com_EENI :
   forall (c1 c2 : com)
@@ -1179,7 +1292,7 @@ Proof.
     apply ctxt_split in H0. destruct H0. subst.
     inversion H1; inversion H2;
       destruct l2'; subst.
-    + (* both eval to true *)
+    + (* both eval to true, secret *)
       replace l__guard0 with l__guard in *.
       * replace (merge Secret l__guard) with Secret in *.
         -- apply IHc1_1 with
@@ -1195,42 +1308,87 @@ Proof.
           assumption.
     + (* both eval to true, public *)
       replace l__guard0 with l__guard in *.
-      * destruct l__guard.
-        -- replace (merge Public Secret) with Secret in *.
-           ++ apply IHc1_1 with
-                  (c2 := c2_1)
-                  (ctxt1 := (st1, Secret))
-                  (ctxt2 := (st2, Secret)); try assumption.
-              simpl_indist.
-           ++ auto.
-        -- replace (merge Public Public) with Public in *.
-           ++ apply IHc1_1 with
-                  (c2 := c2_1)
-                  (ctxt1 := (st1, Public))
-                  (ctxt2 := (st2, Public)); try assumption.
-              simpl_indist.
-           ++ auto.
-      * apply indist_samelabel with
-            (x1 := true) (x2 := true).
-        apply bexp_EENI with
-            (st1 := st1) (st2 := st2) (b := b0);
-          assumption.
+      * eapply IHc1_1; eauto.
+        simpl "==".
+        split.
+        -- destruct l__guard; auto.
+        -- assumption.
+      * assert ((true, l__guard) == (true, l__guard0)).
+        eapply bexp_EENI; eauto.
+        simpl "==" in H5.
+        destruct l__guard; destruct l__guard0;
+          auto; exfalso; auto.
+    + assert (l__guard = Secret /\ l__guard0 = Secret).
+      eapply beval_diverges; eauto.
+      destruct H5. subst. simpl in H13. simpl in H22.
+      apply secret_step in H13.
+      apply secret_step in H22.
+      clear H1. clear H2. clear H7. clear H16. clear H.
+      clear H3. clear H4.
+      assert (st1 == st2').
+      {
+        eapply indist_trans.
+        apply H0. apply H22.
+      }
+      apply indist_comm in H13.
+      assert (st1' == st2').
+      {
+        eapply indist_trans.
+        apply H13. assumption.
+      }
+      simpl "==". split. auto. apply H1.
+    + assert (l__guard = Secret /\ l__guard0 = Secret).
+      eapply beval_diverges; eauto.
+      destruct H5. subst.
+      simpl in H13. simpl in H22.
+      exfalso. eapply leak_step. apply H13.
+    + assert (l__guard = Secret /\ l__guard0 = Secret).
+      eapply beval_diverges; eauto.
+      destruct H5. subst.
+      simpl in H13. simpl in H22.
+      clear H1. clear H2. clear H7. clear H16. clear H.
+      clear H3. clear H4.
+      apply secret_step in H13. apply secret_step in H22.
+      assert (st1 == st2').
+      {
+        eapply indist_trans.
+        apply H0. apply H22.
+      }
+      apply indist_comm in H13.
+      assert (st1' == st2').
+      {
+        eapply indist_trans.
+        apply H13. assumption.
+      }
+      simpl "==". split. auto. apply H1.
+    + assert (l__guard = Secret /\ l__guard0 = Secret).
+      eapply beval_diverges; eauto.
+      destruct H5. subst.
+      simpl in H13. simpl in H22.
+      exfalso. eapply leak_step. apply H22.
+    + replace (merge Secret l__guard) with Secret in *.
+      replace (merge Secret l__guard0) with Secret in *.
+      * eapply IHc1_2; eauto.
+        simpl "==". split. auto. assumption.
+      * destruct l__guard0; auto.
+      * destruct l__guard; auto.
     + replace l__guard0 with l__guard in *.
-      * replace l__guard with Secret in *.
-        -- replace (merge Secret Secret) with Secret in *.
-           ++ assert (st1 == st1').
-              {
-                apply secret_step with (c := c1_1).
-                assumption.
-              }
-              assert (st2 == st2').
-              {
-                apply secret_step with (c := c2_2).
-                assumption.
-              }
-              assert (st1 == st2').
-              {
-                apply indist_trans with (st2 := st2);
-                  assumption.
-              }
-              Abort.
+      destruct l__guard.
+      * simpl in H13. simpl in H22.
+        apply secret_step in H13. apply secret_step in H22.
+        assert (st1 == st2').
+        eapply indist_trans.
+        apply H0. apply H22.
+        apply indist_comm in H13.
+        assert (st1' == st2').
+        eapply indist_trans.
+        apply H13. assumption. simpl. split. auto.
+        assumption.
+      * simpl in H13. simpl in H22.
+        assert ((st1, Public) == (st2, Public)).
+        simpl. split. auto. assumption.
+        eapply IHc1_2; eauto.
+      * assert ((false, l__guard) == (false, l__guard0)).
+        eapply bexp_EENI; eauto. simpl in H5.
+        brute l__guard l__guard0.
+Qed.
