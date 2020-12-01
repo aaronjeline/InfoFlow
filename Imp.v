@@ -158,14 +158,58 @@ Definition bool_value : Type := value bool.
 Definition state := M.t nat_value.
 Close Scope string_scope.
 
+Definition keys (s : state) : list string :=
+  List.map (fun '(x,_) => x) (elements s).
 
-Instance state_indist : Distinguishable state :=
+Instance indist_state : Distinguishable state :=
   {
-  indist s1 s2 := forall (x1 : string) (v1: nat_value),
-      MapsTo x1 v1 s1 ->
-      (exists (v2 : nat_value),
-       MapsTo x1 v2 s2 /\ v1 == v2)
+  indist s1 s2 := forall (x1 : string) (v1 v2: nat_value),
+        (MapsTo x1 v1 s1 ->
+         (exists (v2' : nat_value),
+             MapsTo x1 v2' s2 /\ v1 == v2'))
+        /\
+        (MapsTo x1 v2 s2 ->
+         exists (v1' : nat_value),
+           MapsTo x1 v1' s1 /\ v1' == v2)
   }.
+
+Theorem indist_comm : forall (st1 st2 : state),
+    st1 == st2 -> st2 == st1.
+Proof.
+  intros.
+  unfold "==". simpl.
+  intros.
+  split.
+  - intros.
+    simpl "==" in H. simpl in H.
+    destruct H with
+        (x1 := x1)
+        (v1 := v2)
+        (v2 := v1).
+    destruct H2 as [v1']. assumption.
+    clear H1. clear H.
+    destruct H2.
+    exists v1'. split.
+    + assumption.
+    + destruct v1'. destruct v1.
+      destruct l; destruct l0;
+        try assumption; auto.
+  - intros.
+    simpl "==" in H.
+    destruct H with
+        (x1 := x1)
+        (v1 := v2)
+        (v2 := v1).
+    clear H2. clear H.
+    destruct H1 as [v2']. assumption.
+    destruct H.
+    exists v2'. split.
+    + assumption.
+    + destruct v2'. destruct v2.
+      destruct l; destruct l0;
+        try assumption; auto.
+Qed.
+
 
 Theorem indist_trans : forall (st1 st2 st3 : state),
     st1 == st2 ->
@@ -173,25 +217,41 @@ Theorem indist_trans : forall (st1 st2 st3 : state),
     st1 == st3.
 Proof.
   intros.
-  unfold "==".
-  simpl. intros.
-  unfold "==" in H. simpl in H.
-  specialize (H x1 v1).
-  destruct H as [v2]. assumption.
-  destruct H.
-  unfold "==" in H0. simpl in H0.
-  specialize (H0 x1 v2). destruct H0 as [v3].
-  assumption.
-  destruct H0. exists v3. split.
-  - assumption.
-  - destruct v1. destruct v3. destruct l; destruct l0.
-    + tauto.
-    + destruct v2. destruct l; assumption.
-    + destruct v2. destruct l; assumption.
-    + destruct v2. destruct l.
-      * exfalso. assumption.
-      * subst. reflexivity.
+  simpl "==". intros.
+  split.
+  - intros.
+    simpl "==" in *.
+    specialize (H x1 v1 v2).
+    destruct H. destruct H as [v2']. assumption.
+    destruct H. clear H2.
+    specialize (H0 x1 v2' v2).
+    destruct H0. destruct H0 as [ v2'0 ]. assumption.
+    destruct H0. exists v2'0. split.
+    + assumption.
+    + destruct v1. destruct v2'0. destruct v2.
+      destruct v2'.
+      destruct l; destruct l0;
+        destruct l1; destruct l2; try assumption;
+          try tauto; try (exfalso; assumption);
+            subst; auto.
+  - intros.
+    simpl "==" in *.
+    specialize (H0 x1 v1 v2).
+    destruct H0. destruct H2 as [v1']. assumption.
+    destruct H2.
+    specialize (H x1 v1 v1').
+    destruct H. destruct H4 as [v2']. assumption.
+    destruct H4. exists v2'. split.
+    + assumption.
+    + destruct v2'. destruct v2. destruct v1'. destruct v1.
+      destruct l; destruct l0; destruct l1; destruct l2;
+        try tauto;
+        try (exfalso; assumption);
+        subst; auto.
 Qed.
+
+  
+
 
 Inductive aexp : Type :=
   | ANum (n : nat)
@@ -199,6 +259,7 @@ Inductive aexp : Type :=
   | APlus (a1 a2 : aexp)
   | AMinus (a1 a2 : aexp)
   | AMult (a1 a2 : aexp).
+
 Instance aexp_dec_eq (a1 a2 : aexp) :
   Dec (a1 = a2).
 Proof. dec_eq. Defined.
@@ -600,45 +661,19 @@ Lemma indist_implies_indist :
     MapsTo x v2 st2 ->
     v1 == v2.
 Proof.
-  intros.
-  unfold indist in H. simpl in H.
-  destruct v1 as [n1 l1].
-  destruct v2 as [n2 l2].
-  destruct l1; destruct l2.
-  - apply secret_indist.
-  - contradict H.
-    unfold not. intros.
-    specialize H with (x1 := x) (v1 := (n1, Secret)).
-    destruct H as [nv]. assumption.
-    destruct H as [H2 H3].
-    replace nv with (n2, Public) in *.
-    assumption.
-    apply MapsTo_eq with  (st := st2) (x := x);
+  intros. simpl "==" in H.
+  specialize (H x v1 v2).
+  destruct H. destruct H as [v2']. assumption.
+  destruct H.
+  replace v2' with v2 in *.
+  - destruct v1. destruct v2.
+    destruct l; destruct l0;
+      try tauto;
+      try (exfalso; assumption);
+      subst; auto.
+  - apply MapsTo_eq with (st := st2) (x := x);
       assumption.
-  - contradict H.
-    unfold not. intros.
-    specialize H with (x1 := x) (v1 := (n1, Public)).
-    destruct H as [nv]. assumption.
-    destruct H as [H2 H3].
-    replace nv with (n2, Secret) in *.
-    auto.
-    apply MapsTo_eq with (st := st2) (x := x);
-      assumption.
-  - destruct (n1 =? n2) eqn:Heq.
-    + apply Nat.eqb_eq in Heq.
-      subst. apply public_indist.
-    + contradict H. unfold not. intros.
-      specialize H with (x1 := x) (v1 := (n1, Public)).
-      destruct H as [nv].
-      assumption.
-      destruct H as [H2 H3].
-      replace nv with (n2, Public) in *.
-      apply Nat.eqb_neq in Heq. congruence.
-      apply MapsTo_eq with (st := st2) (x := x);
-        assumption.
 Qed.
-
-
 
 
 Theorem indist_split : forall {X} (n1 n2 : X) (l1 l2 : label),
@@ -789,6 +824,25 @@ Proof.
 Qed.
 
 
+Theorem map_add_congruence : forall (l1 l2 : label) (n1 n2 : nat)
+                               (st : state) (x : string),
+    l1 <> l2 ->
+    MapsTo x (n1, l1) (add x (n2, l2) st) ->
+    False.
+Proof.
+  intros.
+  assert (MapsTo x (n2, l2) (add x (n2, l2) st)).
+  {
+    apply add_1. auto.
+  }
+  assert ((n1, l1) = (n2, l2)).
+  {
+    apply MapsTo_eq with
+        (st := (add x (n2, l2) st))
+        (x := x); auto.
+  }
+  injection H2. intros. congruence.
+Qed.
 
 
 (* the no wrote down rule is sound*)
@@ -798,24 +852,44 @@ Theorem add_secret :
     st == (add x (n, Secret) st).
 Proof.
   intros.
-  unfold "==". simpl.
-  intros.
-  unfold writing_valid in H. destruct H as [n']. destruct H as [l'].
-  destruct H as [H1 H2]. subst.
+  unfold writing_valid in H.
+  destruct H as [n']. destruct H as [l']. destruct H.
+  subst. simpl "==". intros.
   destruct (String.eqb x x1) eqn:Heq.
   - apply String.eqb_eq in Heq.
-    subst.
-    replace v1 with (n', Secret) in *.
-    exists (n, Secret). split.
-    + apply add_1. auto.
-    + tauto.
-    + apply MapsTo_eq with (st := st) (x := x1); assumption.
+    split.
+    + intros. exists (n, Secret).
+      split; subst.
+      * apply add_1. auto.
+      * destruct v1. destruct l.
+        -- tauto.
+        -- assert ((n', Secret) = (n0, Public)).
+           {
+             apply MapsTo_eq with (st := st) (x := x1);
+               assumption.
+           }
+           injection H1. intros. congruence.
+    + intros. subst.
+      exists (n', Secret). destruct v1. destruct v2.
+      split.
+      * assumption.
+      * destruct l; destruct l0;
+          try tauto; try (exfalso; assumption);
+            apply map_add_congruence with
+                (l1 := Public)
+                (l2 := Secret)
+                (n1 := n1)
+                (n2 := n)
+                (st := st)
+                (x := x1); auto; discriminate.
   - apply String.eqb_neq in Heq.
-    exists v1. split.
-    + apply add_2; assumption.
-    + destruct v1. destruct l.
-      * tauto.
-      * auto.
+    split.
+    + intros. exists v1. split.
+      * apply add_2; assumption.
+      * destruct v1. destruct l; auto.
+    + intros. exists v2. split.
+      * apply add_3 with (x := x) (e' := (n, Secret)); auto.
+      * destruct v2. destruct l; auto.
 Qed.
 
 Theorem add_indist :
@@ -825,32 +899,58 @@ Theorem add_indist :
     (add x v1 st1) == (add x v2 st2).
 Proof.
   intros x v1 v2 st1 st2 Hstindist Hvindist.
-  unfold indist in Hstindist. simpl in Hstindist.
-  unfold indist. simpl.
-  intros.
+  simpl "==". intros.
   destruct (String.eqb x x1) eqn:Heqx.
-  - apply String.eqb_eq in Heqx. subst.
-    replace v0 with v1 in *.
-    exists v2. split.
-    + apply add_1. reflexivity.
-    + destruct v1. destruct v2.
-      destruct l; destruct l0;
-        try (tauto);
-        try (inversion Hvindist; auto).
-    + assert (MapsTo x1 v1 (add x1 v1 st1)).
-      apply add_1. reflexivity.
-      apply MapsTo_eq with (st := (add x1 v1 st1)) (x := x1); assumption.
-  - assert (MapsTo x1 v0 st1). apply add_3 with (x := x) (e' := v1).
-    apply String.eqb_neq in Heqx. assumption.
-    assumption.
-    specialize (Hstindist x1 v0). destruct Hstindist as [v2'].
-    assumption. destruct H1.
-    exists v2'. split.
-    + apply add_2. apply String.eqb_neq in Heqx.
-      assumption. assumption.
-    + destruct v0. destruct v2'.
-      destruct l; destruct l0; assumption.
+  - apply String.eqb_eq in Heqx.
+    split.
+    + intros. subst.
+      apply MapsTo_eq with (v1 := v1) in H.
+      * subst. exists v2. split.
+        -- apply add_1. auto.
+        -- destruct v0. destruct v2.
+           destruct l; destruct l0;
+             inversion Hvindist; auto.
+      * apply add_1. auto.
+    + intros. subst.
+      apply MapsTo_eq with (v1 := v2) in H.
+      * subst. exists v1. split.
+        -- apply add_1. auto.
+        -- destruct v1. destruct v3.
+           destruct l; destruct l0;
+             inversion Hvindist; auto.
+      * apply add_1. auto.
+  - apply String.eqb_neq in Heqx.
+    split.
+    + intros.
+      apply add_3 with (x := x) (e' := v1) in H.
+      simpl "==" in Hstindist.
+      specialize (Hstindist x1 v0 v2).
+      destruct Hstindist. destruct H0 as [v2']. assumption.
+      destruct H0. exists v2'.
+      split.
+      * apply add_2 with
+            (x := x)
+            (e' := v2) in H0; assumption.
+      * destruct v0. destruct v2'.
+        destruct l; destruct l0;
+          auto; exfalso; auto.
+      * assumption.
+    + intros.
+      apply add_3 with (x := x) (e' := v2) in H.
+      simpl "==" in Hstindist.
+      specialize (Hstindist x1 v0 v3).
+      destruct Hstindist.
+      destruct H1 as [v1']. assumption.
+      destruct H1.
+      exists v1'. split.
+      * apply add_2 with (x := x) (e' := v1) in H1;
+          assumption.
+      * destruct v1'. destruct v3.
+        destruct l; destruct l0;
+          auto; exfalso; auto.
+      * assumption.
 Qed.
+
 
 
 
@@ -878,12 +978,16 @@ Qed.
 Theorem state_indist_refl : forall (st : state),
     st == st.
 Proof.
-  intros. unfold "==". simpl.
-  intros. exists v1.
-  split.
-  - assumption.
-  - destruct v1. destruct l; auto.
+  intros.
+  simpl "==".
+  intros.
+  split; intros.
+  - exists v1. split. auto.
+    destruct v1. destruct l; auto.
+  - exists v2. split. auto.
+    destruct v2. destruct l; auto.
 Qed.
+
 
 Lemma ctxt_split : forall (st1 st2 : state) (l1 l2 : label),
     (st1, l1) == (st2, l2) ->
@@ -1129,4 +1233,4 @@ Proof.
                 apply indist_trans with (st2 := st2);
                   assumption.
               }
-Abort.
+              Abort.
