@@ -22,9 +22,12 @@ Require Import
 
 
 Module Import M := FMapList.Make(String_as_OT).
+
+(* Instantiate a map type using strings as keys *)
 Module P := WProperties_fun String_as_OT M.
 Module F := P.F.
 
+(* Optionals are moands  *)
 Instance option_monad : Monad option :=
   {
   ret X v := @Some X v;
@@ -35,6 +38,7 @@ Instance option_monad : Monad option :=
   end
   }.
 
+(* some list combinators *)
 Fixpoint foldr {X B}
            (f : X -> B -> B) (b : B) (l : list X) : B :=
   match l with
@@ -68,15 +72,17 @@ Instance shrink_str : Shrink string :=
 Close Scope string_scope.
 
 (* ================================================================= *)
-(** ** Syntax  *)
-
-(** We can add variables to the arithmetic expressions we had before by
-    simply adding one more constructor: *)
+(* Labels, for controlling priviledge *)
 
 Inductive label : Type :=
   | Secret
   | Public.
 
+Derive (Arbitrary, Show) for label.
+Instance eq_dec_label (l1 l2 : label) : Dec (l1 = l2).
+Proof. dec_eq. Defined.
+
+(* Reflection setup *)
 Definition label_eqb l1 l2 :=
   match l1, l2 with
 | Secret, Secret => true
@@ -97,14 +103,15 @@ Proof.
   intros.
   destruct l1; destruct l2; auto; congruence.
 Qed.
-   
-
 
 Definition merge (l1 l2 : label) : label :=
   match l1, l2 with
   | Public, Public => Public
   | _, _ => Secret
   end.
+
+(* Conjecture merge_secret : forall l, merge l Secret = Secret. *)
+(* QuickChick merge_secret. *)
 
 Theorem merge_secret : forall l1,
     merge l1 Secret = Secret.
@@ -125,13 +132,7 @@ Proof.
   destruct l1; destruct l2; auto.
 Qed.
 
-
-Instance eq_label_dec (l1 l2 : label) :
-  Dec (l1 = l2).
-Proof. dec_eq. Defined.
-Derive Show for label.
-Derive Shrink for label.
-Derive Arbitrary for label.
+(* This class drives the entire implementation of IFC-Imp *)
 
 Class Distinguishable X :=
   {
@@ -154,34 +155,46 @@ Instance value_indist {X} : Distinguishable (value X) :=
     end
   }.
 
+
 Definition nat_value : Type := value nat.
-(* Instance nat_indist : Distinguishable nat_value := *)
-(*   { *)
-(*   indist x1 x2 := *)
-(*     match x1, x2 with *)
-(*     | (_, Secret), (_, Secret) => True *)
-(*     | (n1, Public), (n2, Public) => n1 = n2 *)
-(*     | _, _ => False *)
-(*     end *)
-(*   }. *)
+
+Instance dec_value_indist (v1 v2 : nat_value) :
+  Dec (v1 == v2).
+Proof.
+  constructor. unfold ssrbool.decidable.
+  destruct v1. destruct v2.
+  destruct l; destruct l0;
+    try (right; auto; fail).
+  - left. simpl. tauto.
+  - destruct (Nat.eqb n n0) eqn:Heq.
+    + apply Nat.eqb_eq in Heq.
+      subst. left. simpl. auto.
+    + apply Nat.eqb_neq in Heq. right. simpl. auto.
+Qed.
+
 
 Definition bool_value : Type := value bool.
 
-(* Instance bool_indist : Distinguishable (bool_value) := *)
-(*   { *)
-(*   indist x1 x2 := *)
-(*     match x1, x2 with *)
-(*     | (_, Secret), (_, Secret) => True *)
-(*     | (n1, Public), (n2, Public) => n1 = n2 *)
-(*     | _, _ => False *)
-(*     end *)
-(*   }. *)
+Instance bool_value_indist (v1 v2 : bool_value) :
+  Dec (v1 == v2).
+Proof.
+  constructor. unfold ssrbool.decidable.
+  destruct v1. destruct v2.
+  destruct l; destruct l0;
+    try (right; auto; fail).
+  - left. simpl. tauto.
+  - destruct (Bool.eqb b b0) eqn:Heq.
+    + assert (b = b0).
+      apply Bool.eqb_eq. unfold Is_true. rewrite Heq. tauto.
+      subst. left. simpl. auto.
+    + assert (b <> b0).
+      apply Bool.eqb_false_iff. assumption.
+      right. simpl. assumption.
+Qed.
+
 
 Definition state := M.t nat_value.
 Close Scope string_scope.
-
-Definition keys (s : state) : list string :=
-  List.map (fun '(x,_) => x) (elements s).
 
 Instance indist_state : Distinguishable state :=
   {
@@ -195,6 +208,7 @@ Instance indist_state : Distinguishable state :=
            MapsTo x1 v1' s1 /\ v1' == v2)
   }.
 
+     
 Theorem indist_comm : forall (st1 st2 : state),
     st1 == st2 -> st2 == st1.
 Proof.
@@ -285,9 +299,7 @@ Inductive aexp : Type :=
 Instance aexp_dec_eq (a1 a2 : aexp) :
   Dec (a1 = a2).
 Proof. dec_eq. Defined.
-Derive Show for aexp.
-Derive Shrink for aexp.
-Derive Arbitrary for aexp.
+Derive (Show, Shrink, Arbitrary) for aexp.
 
 
 Definition W : string := "W".
@@ -305,9 +317,7 @@ Inductive bexp : Type :=
 Instance bexp_eq_dec (b1 b2 : bexp) :
   Dec (b1 = b2).
 Proof. dec_eq. Defined.
-Derive Show for bexp.
-Derive Arbitrary for bexp.
-Derive Shrink for bexp.
+Derive (Show, Shrink, Arbitrary) for bexp.
 
 Coercion AId : string >-> aexp.
 Coercion ANum : nat >-> aexp.
@@ -361,6 +371,73 @@ Inductive aevalR : state -> aexp -> nat_value -> Prop :=
       aevalR state a1 (n1, l1) ->
       aevalR state a2 (n2, l2) ->
       aevalR state <{a1 * a2}> (n1 * n2, merge l1 l2).
+
+Fixpoint aeval (fuel : nat) (st : state) (a : aexp) : option nat_value :=
+  match fuel with
+| 0 => None
+| S n' => match a with
+       | (ANum n) => Some (n, Public)
+       | (AId x) => find x st
+       | (APlus a1 a2) =>
+         '(n1, l1) <- aeval n' st a1;;
+         '(n2, l2) <- aeval n' st a2;;
+         ret (n1 + n2, merge l1 l2)
+       | (AMinus a1 a2) =>
+         '(n1, l1) <- aeval n' st a1;;
+         '(n2, l2) <- aeval n' st a2;;
+         ret (n1 - n2, merge l1 l2)
+       | (AMult a1 a2) =>
+         '(n1, l1) <- aeval n' st a1;;
+         '(n2, l2) <- aeval n' st a2;;
+         ret (n1 * n2, merge l1 l2)
+         end
+  end.
+
+Theorem aeval_implies_aevalR : forall fuel st a v,
+    aeval fuel st a = Some v ->
+    aevalR st a v.
+Proof.
+  intros.
+  generalize dependent st.
+  generalize dependent fuel.
+  generalize dependent v.
+  induction a; intros;
+    try destruct fuel; try (inversion H).
+  - apply A_Value.
+  - apply A_Id. apply find_2. assumption.
+  - destruct (aeval fuel st a1) eqn:Heq1.
+    + destruct n as [n1 l2].
+      destruct (aeval fuel st a2) eqn:Heq2.
+      * destruct n as [n2 l3].
+        injection H1. intros. subst.
+        apply A_EPlus.
+        -- eapply IHa1. eauto.
+        -- eapply IHa2. eauto.
+      * congruence.
+    + congruence.
+  - destruct (aeval fuel st a1) eqn:Heq1.
+    + destruct n as [n1 l2].
+      destruct (aeval fuel st a2) eqn:Heq2.
+      * destruct n as [n2 l3].
+        injection H1. intros. subst.
+        apply A_EMinus.
+        -- eapply IHa1. eauto.
+        -- eapply IHa2. eauto.
+      * congruence.
+    + congruence.
+  - destruct (aeval fuel st a1) eqn:Heq1.
+    + destruct n as [n1 l2].
+      destruct (aeval fuel st a2) eqn:Heq2.
+      * destruct n as [n2 l3].
+        injection H1. intros. subst.
+        apply A_EMult.
+        -- eapply IHa1. eauto.
+        -- eapply IHa2. eauto.
+      * congruence.
+    + congruence.
+Qed.
+
+
 
 
 
