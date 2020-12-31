@@ -1,4 +1,5 @@
 #lang racket
+;; This file is just for generating some of the images used in the writeup
 (require redex redex/pict)
 
 (define-language Imp
